@@ -16,9 +16,11 @@
  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  =============================================================================*/
 
-#define IP_FORWARD		"/proc/sys/net/ipv4/ip_forward"
-#define SERVICE_URI		"us.ryanhope.freeTetherD"
-#define DEBUG			1
+#define DNSMASQ_EXTRA_PATH		"/tmp/pmnetconfig/dnsmasq.server.conf"
+#define DNSMASQ_ENABLED			"interface=usb0\ninterface=eth0\ninterface=bsl0\n"
+#define IP_FORWARD				"/proc/sys/net/ipv4/ip_forward"
+#define SERVICE_URI				"us.ryanhope.freeTetherD"
+#define DEBUG					1
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -29,11 +31,133 @@
 #include <sys/timeb.h>
 #include <sys/stat.h>
 #include <sys/mount.h>
+#include <sys/inotify.h>
 
 #include <glib.h>
 #include <lunaservice.h>
 
+LSPalmService *serviceHandle;
+
 char *tmpPath;
+
+bool monitor_ip_forward;
+
+int ev_size = sizeof(struct inotify_event);
+int buf_size = 32*(sizeof(struct inotify_event)+16);
+
+void *ip_forward_monitor(void *ptr) {
+
+	LSError lserror;
+	LSErrorInit(&lserror);
+
+	int fd = inotify_init();
+	if (fd<0) {
+		perror("inotify_init");
+		return;
+	}
+
+	int wd = inotify_add_watch(fd, tmpPath, IN_MODIFY);
+	if (wd<0) {
+		perror ("inotify_add_watch");
+		return;
+	}
+
+	char buf[buf_size], *tmp = 0;
+	int len = 0, state = 0;
+	FILE *fp;
+
+	while (monitor_ip_forward) {
+		len = read (fd, buf, buf_size);
+		if (len > 0) {
+			fp = fopen(tmpPath, "r");
+			if (fp) {
+				state = fgetc(fp);
+				fclose(fp);
+				len = asprintf(&tmp, "{\"state\":%c}", (char)state);
+				if (tmp) {
+					LSSubscriptionRespond(serviceHandle,"/get_ip_forward",tmp, &lserror);
+					free(tmp);
+				}
+			}
+		}
+	}
+
+	if (LSErrorIsSet(&lserror)) {
+		LSErrorPrint(&lserror, stderr);
+		LSErrorFree(&lserror);
+	}
+
+}
+
+void start_stop_dnsmasq(char *cmd) {
+	pid_t pid = vfork();
+	if (pid == 0)
+		execl(cmd, cmd, "-q", "dnsmasq", (char*)0);
+}
+
+
+void restart_dnsmasq() {
+	start_stop_dnsmasq("/sbin/stop");
+	start_stop_dnsmasq("/sbin/start");
+}
+
+bool enable_nat(LSHandle* lshandle, LSMessage *message, void *ctx) {
+
+	LSError lserror;
+	LSErrorInit(&lserror);
+
+	FILE *fp;
+	int len = 0;
+
+	fp = fopen(DNSMASQ_EXTRA_PATH, "w");
+	if (fp) {
+		len = fprintf(fp,"%s",DNSMASQ_ENABLED);
+		fclose(fp);
+		restart_dnsmasq();
+	}
+
+	if (len>0)
+		LSMessageReply(lshandle,message,"{\"returnValue\":true}",&lserror);
+	else
+		LSMessageReply(lshandle,message,"{\"returnValue\":false}",&lserror);
+
+	if (LSErrorIsSet(&lserror)) {
+		LSErrorPrint(&lserror, stderr);
+		LSErrorFree(&lserror);
+	}
+
+	return true;
+
+}
+
+bool disable_nat(LSHandle* lshandle, LSMessage *message, void *ctx) {
+
+	LSError lserror;
+	LSErrorInit(&lserror);
+
+	FILE *fp;
+	int len = 0;
+
+	fp = fopen(DNSMASQ_EXTRA_PATH, "w");
+	if (fp) {
+		len = fprintf(fp,"");
+		fclose(fp);
+		restart_dnsmasq();
+	}
+
+	if (len==0)
+		LSMessageReply(lshandle,message,"{\"returnValue\":true}",&lserror);
+	else
+		LSMessageReply(lshandle,message,"{\"returnValue\":false}",&lserror);
+
+	if (LSErrorIsSet(&lserror)) {
+		LSErrorPrint(&lserror, stderr);
+		LSErrorFree(&lserror);
+	}
+
+	return true;
+
+}
 
 bool get_ip_forward(LSHandle* lshandle, LSMessage *message, void *ctx) {
 
@@ -112,6 +236,8 @@ bool toggle_ip_forward(LSHandle* lshandle, LSMessage *message, void *ctx) {
 LSMethod methods[] = {
 		{"get_ip_forward",		get_ip_forward},
 		{"toggle_ip_forward",	toggle_ip_forward},
+		{"enable_nat",			enable_nat},
+		{"disable_nat",			disable_nat},
 		{0,0}
 };
 
@@ -122,7 +248,6 @@ void start_service() {
 
 	GMainLoop *loop = g_main_loop_new(NULL, FALSE);
 
-	LSPalmService *serviceHandle;
 	LSRegisterPalmService(SERVICE_URI, &serviceHandle, &lserror);
 	LSPalmServiceRegisterCategory(serviceHandle, "/", methods, NULL, NULL, NULL, &lserror);
 	LSGmainAttachPalmService(serviceHandle, loop, &lserror);
@@ -172,7 +297,14 @@ int main(int argc, char *argv[]) {
 	mount("/dev/null", IP_FORWARD, NULL, MS_BIND, NULL);
 	mount("proc", tmpDir, "proc", 0, NULL);
 
+	monitor_ip_forward = true;
+
+	pthread_t ip_forward_monitor_thread;
+	ret = pthread_create(&ip_forward_monitor_thread, NULL, ip_forward_monitor, NULL);
+
 	start_service();
+
+	monitor_ip_forward = false;
 
 	umount(tmpDir);
 	rmdir(tmpDir);
