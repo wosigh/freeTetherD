@@ -1,0 +1,12 @@
+#!/bin/sh                                                                                       
+
+PID="us.ryanhope.freetetherd"
+
+# Install the upstart script
+rm -f /etc/event.d/${PID}
+cp /var/etc/event.d/${PID} /etc/event.d/${PID}
+
+# Start the service
+/sbin/start ${PID}
+
+exit 0

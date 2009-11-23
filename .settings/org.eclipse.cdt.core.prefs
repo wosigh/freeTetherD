@@ -1,0 +1,3 @@
+#Thu Oct 29 20:14:20 EDT 2009
+eclipse.preferences.version=1
+environment/project/0.169797003=<?xml version\="1.0" encoding\="UTF-8" standalone\="no"?>\n<environment append\="true" appendContributed\="true">\n<variable delimiter\=";" name\="CROSS_COMPILE_ROOT" operation\="append" value\="/usr/armv7l-softfloat-linux-gnueabi"/>\n<variable delimiter\=";" name\="CROSS_COMPILE" operation\="append" value\="armv7l-softfloat-linux-gnueabi-"/>\n</environment>\n
