@@ -6,3 +6,4 @@ us.ryanhope.freetetherd*
 *.swp
 *.swo
 *.swn
+!binaries/*
