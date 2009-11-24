@@ -2,7 +2,7 @@ VERSION			=	0.0.1
 
 CC				=	$(CROSS_COMPILE)gcc
 
-MAIN_INCLUDES	=	-I. \
+MAIN_INCLUDES	=	-I. -Iinclude -Inet-lib \
 					-I$(CROSS_COMPILE_ROOT)/usr/include/glib-2.0 \
 					-I$(CROSS_COMPILE_ROOT)/usr/lib/glib-2.0/include \
 					-I$(CROSS_COMPILE_ROOT)/usr/include/lunaservice \
@@ -49,14 +49,22 @@ all: $(PROGRAM)
 
 fresh: clean all
 
-$(PROGRAM): $(OBJECTS)
-	$(CC) $(CFLAGS) $(OBJECTS) -o $(PROGRAM) $(INCLUDES) $(LIBS)
+$(PROGRAM): libnet-tools.a $(OBJECTS)
+	$(CC) $(CFLAGS) $(OBJECTS) net-lib/libnet-tools.a -o $(PROGRAM) $(INCLUDES) $(LIBS)
+	
+libnet-tools.a:
+	@$(MAKE) -C net-lib/
 
 $(OBJECTS): %.o: %.c
 	$(CC) $(CFLAGS) -c $<  -o $@ -I. $(INCLUDES) $(LIBS)
 	
+subdirs:
+	
 clean-objects:
 	rm -rf $(OBJECTS)
 	
-clean: clean-objects
-	rm -rf $(PROGRAM_BASE)*
+clean-net-tools:
+	@$(MAKE) -C net-lib/ clean
+	
+clean: clean-objects clean-net-tools
+	rm -rf $(PROGRAM_BASE)*;

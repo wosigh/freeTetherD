@@ -16,11 +16,13 @@
  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  =============================================================================*/
 
+#define DFLT_AF "inet"
+
 #define DNSMASQ_EXTRA_PATH		"/tmp/pmnetconfig/dnsmasq.server.conf"
 #define DNSMASQ_ENABLED			"interface=usb0\n" \
-								"interface=eth0\n" \
-								"interface=bsl0\n" \
-								"dhcp-range=192.168.0.50,192.168.0.150,12h\n"
+	"interface=eth0\n" \
+	"interface=bsl0\n" \
+	"dhcp-range=192.168.0.50,192.168.0.150,12h\n"
 #define IP_FORWARD				"/proc/sys/net/ipv4/ip_forward"
 #define SERVICE_URI				"us.ryanhope.freeTetherD"
 #define DEBUG					1
@@ -35,6 +37,11 @@
 #include <sys/stat.h>
 #include <sys/mount.h>
 #include <sys/inotify.h>
+#include <net/if.h>
+
+#include "sockets.h"
+#include "interface.h"
+#include "net-support.h"
 
 #include <glib.h>
 #include <lunaservice.h>
@@ -48,13 +55,44 @@ bool monitor_ip_forward;
 int ev_size = sizeof(struct inotify_event);
 int buf_size = 32*(sizeof(struct inotify_event)+16);
 
+char *usb0[] = {"default", "dev", "usb0", 0};
+char *eth0[] = {"default", "dev", "eth0", 0};
+char *bsl0[] = {"default", "dev", "bsl0", 0};
+
 int dirty_shit() {
 	int ret = 0;
 	ret += system("iptables -t nat -A POSTROUTING -o ppp0 -j MASQUERADE");
-	ret += system("ip route del default scope global dev usb0");
-	ret += system("ip route del default scope global dev eth0");
-	ret += system("ip route del default dev bsl0");
+    setroute_init();
+    getroute_init();
+	ret += route_edit(RTACTION_DEL, "inet", 0, usb0);
+	ret += route_edit(RTACTION_DEL, "inet", 0, eth0);
+	ret += route_edit(RTACTION_DEL, "inet", 0, bsl0);
+
 	return ret;
+}
+
+char *get_if_addy(char *ifname) {
+
+	struct aftype *ap;
+	struct ifreq ifr;
+	struct interface *ife = 0;
+
+	safe_strncpy(ifr.ifr_name, ifname, IFNAMSIZ);
+	ife = lookup_interface(ifname);
+
+	if (ife && do_if_fetch(ife)>=0) {
+
+		ap = get_afntype(ife->addr.sa_family);
+		if (ap == NULL)
+			ap = get_afntype(0);
+
+		if (ife->has_ip) {
+			return ap->sprint(&ife->addr, 1);
+		}
+	}
+
+	return NULL;
+
 }
 
 void *ip_forward_monitor(void *ptr) {
@@ -245,11 +283,43 @@ bool toggle_ip_forward(LSHandle* lshandle, LSMessage *message, void *ctx) {
 
 }
 
+bool get_ip_address(LSHandle* lshandle, LSMessage *message, void *ctx) {
+
+	LSError lserror;
+	LSErrorInit(&lserror);
+
+	json_t *object = LSMessageGetPayloadJSON(message);
+
+	char *interface = 0;
+	json_get_string(object, "interface", &interface);
+
+	char *address = get_if_addy(interface);
+
+	int len = 0;
+	char *jsonResponse = 0;
+	asprintf(&jsonResponse, "{\"interface\":\"%s\",\"address\":\"%s\"}", interface, address);
+
+	if (jsonResponse) {
+		LSMessageReply(lshandle,message,jsonResponse,&lserror);
+		free(jsonResponse);
+	} else
+		LSMessageReply(lshandle,message,"{\"returnValue\":false}",&lserror);
+
+	if (LSErrorIsSet(&lserror)) {
+		LSErrorPrint(&lserror, stderr);
+		LSErrorFree(&lserror);
+	}
+
+	return true;
+
+}
+
 LSMethod methods[] = {
 		{"get_ip_forward",		get_ip_forward},
 		{"toggle_ip_forward",	toggle_ip_forward},
 		{"enable_nat",			enable_nat},
 		{"disable_nat",			disable_nat},
+		{"get_ip_address",		get_ip_address},
 		{0,0}
 };
 
@@ -282,20 +352,29 @@ char *substr(const char *pstr, int start, int numchars) {
 
 int main(int argc, char *argv[]) {
 
+	skfd = sockets_open(0);
+
 	int ret = 0;
 
 	do {
 		ret = umount(IP_FORWARD);
 	} while (ret==0);
 
+	int len = 0;
 	struct dirent *dp;
 	DIR *tmp = opendir("/tmp");
 	char *sub;
+	char *path;
 	while ((dp = readdir(tmp)) != NULL) {
 		sub = substr(dp->d_name,0,11);
 		if (strcmp(sub,"freeTether.")==0) {
-			umount(dp->d_name);
-			rmdir(dp->d_name);
+			path = 0;
+			len = asprintf(&path, "/tmp/%s", dp->d_name);
+			if (path) {
+				umount(path);
+				rmdir(path);
+				free(path);
+			}
 		}
 		free(sub);
 	}
@@ -324,6 +403,8 @@ int main(int argc, char *argv[]) {
 	rmdir(tmpDir);
 
 	umount(IP_FORWARD);
+
+	close(skfd);
 
 	return 0;
 
