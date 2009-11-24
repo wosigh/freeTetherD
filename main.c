@@ -302,6 +302,11 @@ int main(int argc, char *argv[]) {
 	pthread_t ip_forward_monitor_thread;
 	ret = pthread_create(&ip_forward_monitor_thread, NULL, ip_forward_monitor, NULL);
 
+	ret = system("iptables -t nat -A POSTROUTING -o ppp0 -j MASQUERADE");
+	ret = system("ip route del default scope global dev usb0");
+	ret = system("ip route del default scope global dev eth0");
+	ret = system("ip route del default dev bsl0");
+
 	start_service();
 
 	monitor_ip_forward = false;
