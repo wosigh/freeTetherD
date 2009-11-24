@@ -17,7 +17,10 @@
  =============================================================================*/
 
 #define DNSMASQ_EXTRA_PATH		"/tmp/pmnetconfig/dnsmasq.server.conf"
-#define DNSMASQ_ENABLED			"interface=usb0\ninterface=eth0\ninterface=bsl0\n"
+#define DNSMASQ_ENABLED			"interface=usb0\n" \
+								"interface=eth0\n" \
+								"interface=bsl0\n" \
+								"dhcp-range=192.168.0.50,192.168.0.150,12h\n"
 #define IP_FORWARD				"/proc/sys/net/ipv4/ip_forward"
 #define SERVICE_URI				"us.ryanhope.freeTetherD"
 #define DEBUG					1
@@ -44,6 +47,15 @@ bool monitor_ip_forward;
 
 int ev_size = sizeof(struct inotify_event);
 int buf_size = 32*(sizeof(struct inotify_event)+16);
+
+int dirty_shit() {
+	int ret = 0;
+	ret += system("iptables -t nat -A POSTROUTING -o ppp0 -j MASQUERADE");
+	ret += system("ip route del default scope global dev usb0");
+	ret += system("ip route del default scope global dev eth0");
+	ret += system("ip route del default dev bsl0");
+	return ret;
+}
 
 void *ip_forward_monitor(void *ptr) {
 
@@ -302,10 +314,7 @@ int main(int argc, char *argv[]) {
 	pthread_t ip_forward_monitor_thread;
 	ret = pthread_create(&ip_forward_monitor_thread, NULL, ip_forward_monitor, NULL);
 
-	ret = system("iptables -t nat -A POSTROUTING -o ppp0 -j MASQUERADE");
-	ret = system("ip route del default scope global dev usb0");
-	ret = system("ip route del default scope global dev eth0");
-	ret = system("ip route del default dev bsl0");
+	dirty_shit();
 
 	start_service();
 
