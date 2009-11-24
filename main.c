@@ -38,6 +38,7 @@
 #include <sys/mount.h>
 #include <sys/inotify.h>
 #include <net/if.h>
+#include <netinet/in.h>
 
 #include "sockets.h"
 #include "interface.h"
@@ -45,6 +46,8 @@
 
 #include <glib.h>
 #include <lunaservice.h>
+
+extern struct aftype inet_aftype;
 
 LSPalmService *serviceHandle;
 
@@ -62,13 +65,29 @@ char *bsl0[] = {"default", "dev", "bsl0", 0};
 int dirty_shit() {
 	int ret = 0;
 	ret += system("iptables -t nat -A POSTROUTING -o ppp0 -j MASQUERADE");
-    setroute_init();
-    getroute_init();
+	setroute_init();
+	getroute_init();
 	ret += route_edit(RTACTION_DEL, "inet", 0, usb0);
 	ret += route_edit(RTACTION_DEL, "inet", 0, eth0);
 	ret += route_edit(RTACTION_DEL, "inet", 0, bsl0);
 
 	return ret;
+}
+
+int set_ip_using(const char *name, int c, unsigned long ip) {
+
+	struct ifreq ifr;
+	struct sockaddr_in sin;
+
+	safe_strncpy(ifr.ifr_name, name, IFNAMSIZ);
+	memset(&sin, 0, sizeof(struct sockaddr));
+	sin.sin_family = AF_INET;
+	sin.sin_addr.s_addr = ip;
+	memcpy(&ifr.ifr_addr, &sin, sizeof(struct sockaddr));
+	if (ioctl(skfd, c, &ifr) < 0)
+		return -1;
+	return 0;
+
 }
 
 char *get_if_addy(char *ifname) {
@@ -314,12 +333,53 @@ bool get_ip_address(LSHandle* lshandle, LSMessage *message, void *ctx) {
 
 }
 
+bool set_ip_address(LSHandle* lshandle, LSMessage *message, void *ctx) {
+
+	LSError lserror;
+	LSErrorInit(&lserror);
+
+	json_t *object = LSMessageGetPayloadJSON(message);
+
+	int ret = -1;
+	char *interface = 0;
+	char *address = 0;
+	json_get_string(object, "interface", &interface);
+	json_get_string(object, "address", &address);
+
+	unsigned long ip;
+	struct sockaddr_in sin;
+	char host[128];
+	safe_strncpy(host, address, (sizeof host));
+	inet_aftype.input(0, host, (struct sockaddr *)&sin);
+	memcpy(&ip, &sin.sin_addr.s_addr, sizeof(unsigned long));
+	ret = set_ip_using(interface, SIOCSIFADDR, ip);
+
+	int len = 0;
+	char *jsonResponse = 0;
+	asprintf(&jsonResponse, "{\"interface\":\"%s\",\"address\":\"%s\"}", interface, get_if_addy(interface));
+
+	if (jsonResponse) {
+		LSMessageReply(lshandle,message,jsonResponse,&lserror);
+		free(jsonResponse);
+	} else
+		LSMessageReply(lshandle,message,"{\"returnValue\":false}",&lserror);
+
+	if (LSErrorIsSet(&lserror)) {
+		LSErrorPrint(&lserror, stderr);
+		LSErrorFree(&lserror);
+	}
+
+	return true;
+
+}
+
 LSMethod methods[] = {
 		{"get_ip_forward",		get_ip_forward},
 		{"toggle_ip_forward",	toggle_ip_forward},
 		{"enable_nat",			enable_nat},
 		{"disable_nat",			disable_nat},
 		{"get_ip_address",		get_ip_address},
+		{"set_ip_address",		set_ip_address},
 		{0,0}
 };
 
