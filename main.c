@@ -33,6 +33,7 @@
 #include <fcntl.h>
 #include <string.h>
 #include <dirent.h>
+#include <signal.h>
 #include <sys/timeb.h>
 #include <sys/stat.h>
 #include <sys/mount.h>
@@ -52,6 +53,7 @@ extern struct aftype inet_aftype;
 LSPalmService *serviceHandle;
 
 char *tmpPath;
+char *tmpDir;
 
 bool monitor_ip_forward;
 
@@ -410,13 +412,31 @@ char *substr(const char *pstr, int start, int numchars) {
 	return pnew;
 }
 
+void cleanup() {
+	monitor_ip_forward = false;
+	umount(tmpDir);
+	rmdir(tmpDir);
+	umount(IP_FORWARD);
+	close(skfd);
+	free(tmpPath);
+}
+
+void sighandler(int sig) {
+	cleanup();
+	exit(0);
+}
+
 int main(int argc, char *argv[]) {
+
+	signal(SIGINT, sighandler);
+	signal(SIGTERM, sighandler);
+	signal(SIGQUIT, sighandler);
 
 	skfd = sockets_open(0);
 
 	int ret = 0;
 
-	do {
+	/*do {
 		ret = umount(IP_FORWARD);
 	} while (ret==0);
 
@@ -438,10 +458,10 @@ int main(int argc, char *argv[]) {
 		}
 		free(sub);
 	}
-	closedir(tmp);
+	closedir(tmp);*/
 
 	char template[] = "/tmp/freeTether.XXXXXX";
-	char *tmpDir = strdup(mkdtemp(template));
+	tmpDir = strdup(mkdtemp(template));
 
 	ret = asprintf(&tmpPath,"%s/sys/net/ipv4/ip_forward",tmpDir);
 
@@ -457,14 +477,7 @@ int main(int argc, char *argv[]) {
 
 	start_service();
 
-	monitor_ip_forward = false;
-
-	umount(tmpDir);
-	rmdir(tmpDir);
-
-	umount(IP_FORWARD);
-
-	close(skfd);
+	cleanup();
 
 	return 0;
 
