@@ -5,6 +5,9 @@ PID="us.ryanhope.freetetherd"
 # Stop the service
 /sbin/stop ${PID}
 
+# Remove the service binary
+rm -f /var/usr/bin/${PID}
+
 # Remove the upstart script
 rm -f /etc/event.d/${PID}
 
