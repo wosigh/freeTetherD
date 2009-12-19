@@ -11,9 +11,11 @@ rm -f /etc/event.d/${PID}
 cp /var/etc/event.d/${PID} /etc/event.d/${PID}
 
 # Install the service binary
-rm -f /var/usr/bin/${PID}
-mkdir -p /var/usr/bin
-cp $IPKG_OFFLINE_ROOT/usr/bin/${PID} /var/usr/bin/${PID}
+if [ "$IPKG_OFFLINE_ROOT" != "/var" ] ; then
+  rm -f /var/usr/bin/${PID}
+  mkdir -p /var/usr/bin
+  cp $IPKG_OFFLINE_ROOT/usr/bin/${PID} /var/usr/bin/${PID}
+fi
 
 # Start the service
 /sbin/start ${PID}

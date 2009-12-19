@@ -6,7 +6,9 @@ PID="us.ryanhope.freetetherd"
 /sbin/stop ${PID}
 
 # Remove the service binary
-rm -f /var/usr/bin/${PID}
+if [ "$IPKG_OFFLINE_ROOT" != "/var" ] ; then
+  rm -f /var/usr/bin/${PID}
+fi
 
 # Remove the upstart script
 rm -f /etc/event.d/${PID}
