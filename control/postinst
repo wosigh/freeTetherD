@@ -8,7 +8,7 @@ fi
 
 # Install the upstart script
 rm -f /etc/event.d/${PID}
-cp /var/etc/event.d/${PID} /etc/event.d/${PID}
+cp $IPKG_OFFLINE_ROOT/etc/event.d/${PID} /etc/event.d/${PID}
 
 # Install the service binary
 if [ "$IPKG_OFFLINE_ROOT" != "/var" ] ; then
